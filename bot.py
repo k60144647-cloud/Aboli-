@@ -1,8 +1,7 @@
 import json
 import os
 import random
-import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
@@ -11,11 +10,11 @@ TOKEN = "8873887420:AAHINF0T2CDM_rs41XYyYSORAONvYFJETn8"
 
 # ====== تنظیمات بازی ======
 DATA_FILE = "data.json"
-COOLDOWN_MINUTES = 5
-POINT_RANGE = (1, 50)
-TRIGGER_WORDS = ["ابول", "ابولی"]
+COOLDOWN_MINUTES = 5  # هر ۵ دقیقه یک بار
+POINT_RANGE = (1, 50)  # محدوده امتیاز شانسی
+TRIGGER_WORDS = ["ابول", "ابولی"]  # کلمات کلیدی
 
-# ====== توابع ذخیره و بارگذاری ======
+# ====== توابع مدیریت فایل داده ======
 def load_data():
     if os.path.exists(DATA_FILE):
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -30,12 +29,13 @@ def save_data(data):
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "🤖 سلام! من ربات ابول‌پوینت هستم.\n"
-        "تو گروه عضو شو و «ابول» یا «ابولی» بفرست تا شانس‌ت رو امتحان کنی!\n"
-        "هر ۵ دقیقه یک بار می‌تونی امتیاز بگیری. 🎲"
+        "در گروه عضو شوید و کلمه «ابول» یا «ابولی» را بفرستید تا شانس خود را امتحان کنید!\n"
+        "هر ۵ دقیقه یک بار می‌توانید امتیاز بگیرید. 🎲"
     )
 
-# ====== پردازش پیام‌ها ======
+# ====== پردازش پیام‌های گروه ======
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # فقط پیام‌های متنی در گروه را پردازش کن
     if not update.message or not update.message.text or update.message.chat.type not in ["group", "supergroup"]:
         return
 
@@ -43,17 +43,21 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = update.message.from_user.username or "کاربر"
     text = update.message.text.strip()
 
+    # بررسی کلمات کلیدی (مقایسه غیرحساس به حروف بزرگ/کوچک)
     if text.lower() not in [w.lower() for w in TRIGGER_WORDS]:
         return
 
+    # بارگذاری داده‌ها
     data = load_data()
 
+    # مقداردهی اولیه برای کاربر جدید
     if user_id not in data:
         data[user_id] = {"points": 0, "last_claim": None}
 
     user_data = data[user_id]
-    now = datetime.now()
 
+    # بررسی زمان انقضای ۵ دقیقه
+    now = datetime.now()
     if user_data["last_claim"]:
         last_time = datetime.fromisoformat(user_data["last_claim"])
         diff = now - last_time
@@ -66,12 +70,15 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
             return
 
+    # تولید امتیاز شانسی
     point = random.randint(POINT_RANGE[0], POINT_RANGE[1])
     user_data["points"] += point
     user_data["last_claim"] = now.isoformat()
 
+    # ذخیره داده‌ها
     save_data(data)
 
+    # ارسال پیام موفقیت
     await update.message.reply_text(
         f"🔥 ابول ابول !\n\n"
         f"🎯 شما عدد شانسی **{point}** ابول‌پوینت گرفتید!\n"
@@ -79,17 +86,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"⭐ دوباره ۵ دقیقه دیگه می‌تونی تلاش کنی!"
     )
 
-# ====== دستور امتیاز ======
+# ====== دستور امتیاز (اختیاری) ======
 async def my_points(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.message.from_user.id)
     data = load_data()
     if user_id in data:
         points = data[user_id]["points"]
-        await update.message.reply_text(f"💎 کل ابول‌پوینت‌های شما: **{points}**")
+        await update.message.reply_text(f"💎 {update.message.from_user.username} عزیز، کل ابول‌پوینت‌های شما: **{points}**")
     else:
-        await update.message.reply_text("⛔ هنوز هیچ امتیازی نداری. اولین «ابول» رو بفرست!")
+        await update.message.reply_text("⛔ شما هنوز هیچ امتیازی کسب نکردید. اولین «ابول» رو بفرست!")
 
-# ====== اجرای اصلی ======
+# ====== راه‌اندازی اصلی (روش Polling ساده) ======
 def main():
     app = Application.builder().token(TOKEN).build()
 
@@ -97,16 +104,9 @@ def main():
     app.add_handler(CommandHandler("points", my_points))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # روش اجرا روی Railway (وب‌هوک)
-    port = int(os.environ.get("PORT", 8443))
-    app.run_webhook(
-        listen="0.0.0.0",
-        port=port,
-        url_path=TOKEN,
-        webhook_url=f"https://{os.environ.get('RAILWAY_STATIC_URL')}/{TOKEN}"
-    )
-    # اگه خواستی روی سیستم خودت تست کنی، دو خط بالا رو کامنت کن و خط پایین رو فعال کن:
-    # app.run_polling()
+    # اجرا با روش Polling (بدون نیاز به دامنه و وب‌هوک)
+    print("🤖 ربات ابول‌پوینت روشن شد...")
+    app.run_polling()
 
 if __name__ == "__main__":
     main()
